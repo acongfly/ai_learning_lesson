@@ -1,0 +1,65 @@
+[project]
+name = "ai-agent-test"
+version = "0.1.0"
+description = "AI学习路径项目 - 从基础LLM调用到LangGraph多智能体"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "langchain>=1.2.10",
+    "langchain-community>=0.4.1",
+    "langchain-core>=0.3.0",
+    "langchain-ollama>=1.0.1",
+    "langchain-openai>=1.1.10",
+    "langgraph>=0.4.0",
+    "openai>=2.24.0",
+    "tiktoken>=0.9.0",
+    "pyyaml>=6.0.3",
+]
+
+[project.optional-dependencies]
+# Chapter 06: Vector-store RAG examples (Linux / macOS 14+ / Windows only).
+# Both langchain-chroma (via chromadb → onnxruntime) and faiss-cpu require
+# a supported OS. Neither has wheels for macOS < 14 Intel.
+# Install with: uv sync --extra rag
+rag = [
+    "langchain-chroma>=0.1.0",
+    "faiss-cpu>=1.9.0",
+]
+# Chapter 06: Milvus 向量存储（推荐在 Linux / Windows 或 macOS 14+ 使用）。
+# 使用 Milvus Lite 本地文件模式时，无需额外启动 Milvus 服务。
+# Install with: uv sync --extra milvus
+milvus = [
+    "langchain-milvus>=0.1.8",
+    "pymilvus>=2.5.0",
+    "milvus-lite>=2.4.10",
+]
+# Chapter 10: SQLite persistent memory (all platforms).
+# Install with: uv sync --extra memory
+memory = [
+    "langgraph-checkpoint-sqlite>=3.0.1",
+]
+# Chapter 10: Redis memory backend.
+# Install with: uv sync --extra memory-redis
+memory-redis = [
+    "redis>=5.2.1",
+]
+# Chapter 10: MongoDB memory backend.
+# Install with: uv sync --extra memory-mongodb
+memory-mongodb = [
+    "pymongo>=4.11.1",
+]
+# Chapter 10: PostgreSQL memory backend.
+# Install with: uv sync --extra memory-postgres
+memory-postgres = [
+    "psycopg[binary]>=3.2.3",
+]
+# Chapter 13: Production deployment with FastAPI + streaming.
+# Install with: uv sync --extra api
+api = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+]
+
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true
