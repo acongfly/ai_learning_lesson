@@ -19,6 +19,7 @@
 | 01 | 基础 LLM 调用 | ⭐ |
 | 02 | Prompt 工程 | ⭐⭐ |
 | 03 | Chain 链式调用 | ⭐⭐ |
+| 04 | Tools 工具调用 | ⭐⭐⭐ |
 
 继续补充中......
 
@@ -28,7 +29,8 @@
 - [01 - 基础LLM调用](https://mp.weixin.qq.com/s/OtdwOoRj0zNXJtk_-AygaQ)
 - [02 - Prompt工程](https://mp.weixin.qq.com/s/18WpF61D63yOYpO829j2rQ)
 - [03 - Chain链式调用](https://mp.weixin.qq.com/s/AAsPWyFzwvDBDlMvBGBU7A)
-
+- [04 - Tools工具调用](https://mp.weixin.qq.com/s/k1z69yb9SHlEoGIwCOOYyw)
+- 
 
 ### 代码示例
 
@@ -47,6 +49,10 @@
 - [顺序链](lessons/03_chains/02_sequential_chain.py)
 - [输出解析器](lessons/03_chains/03_output_parsers.py)
 
+**第04章 Tools工具调用**
+- [基础工具](lessons/04_tools/01_basic_tools.py)
+- [本地命令工具](lessons/04_tools/02_local_commands.py)
+- [文件操作工具](lessons/04_tools/03_file_operations.py)
 
 ## 🚀 快速开始
 
