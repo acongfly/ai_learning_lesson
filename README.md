@@ -132,4 +132,4 @@ default = true
 
 ## 更多内容 关注公众号「阿聪谈架构」，获取最新教程和实战案例！
 ### - [阿聪谈架构 AI专栏](https://mp.weixin.qq.com/mp/appmsgalbum?__biz=MzI3NTc0OTYxOQ==&action=getalbum&album_id=4415703927233511424#wechat_redirect)
-![img_1.png](img/关注我.png)
+![img_1.png](img/qrcode_for_gh_4ebd2ac0d551_258.jpg)
