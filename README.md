@@ -20,6 +20,7 @@
 | 02 | Prompt 工程 | ⭐⭐ |
 | 03 | Chain 链式调用 | ⭐⭐ |
 | 04 | Tools 工具调用 | ⭐⭐⭐ |
+| 05 | Agent 智能体 | ⭐⭐⭐ |
 
 继续补充中......
 
@@ -30,7 +31,7 @@
 - [02 - Prompt工程](https://mp.weixin.qq.com/s/18WpF61D63yOYpO829j2rQ)
 - [03 - Chain链式调用](https://mp.weixin.qq.com/s/AAsPWyFzwvDBDlMvBGBU7A)
 - [04 - Tools工具调用](https://mp.weixin.qq.com/s/k1z69yb9SHlEoGIwCOOYyw)
-- 
+- [05 - Agent智能体](https://mp.weixin.qq.com/s/Pp7R0k7kdd_OayqNOCjSqg)
 
 ### 代码示例
 
@@ -53,6 +54,12 @@
 - [基础工具](lessons/04_tools/01_basic_tools.py)
 - [本地命令工具](lessons/04_tools/02_local_commands.py)
 - [文件操作工具](lessons/04_tools/03_file_operations.py)
+
+**第05章 Agent智能体**
+- [ReAct Agent](lessons/05_agents/01_react_agent.py)
+- [工具调用Agent](lessons/05_agents/02_tool_calling_agent.py)
+- [多工具Agent](lessons/05_agents/03_multi_tool_agent.py)
+
 
 ## 🚀 快速开始
 
