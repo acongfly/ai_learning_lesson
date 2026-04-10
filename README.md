@@ -21,6 +21,7 @@
 | 03 | Chain 链式调用 | ⭐⭐ |
 | 04 | Tools 工具调用 | ⭐⭐⭐ |
 | 05 | Agent 智能体 | ⭐⭐⭐ |
+| 06 | RAG 检索增强生成 | ⭐⭐⭐⭐ |
 
 继续补充中......
 
@@ -32,6 +33,9 @@
 - [03 - Chain链式调用](https://mp.weixin.qq.com/s/AAsPWyFzwvDBDlMvBGBU7A)
 - [04 - Tools工具调用](https://mp.weixin.qq.com/s/k1z69yb9SHlEoGIwCOOYyw)
 - [05 - Agent智能体](https://mp.weixin.qq.com/s/Pp7R0k7kdd_OayqNOCjSqg)
+- [第06章：AI RAG 检索增强生成 — 从零到生产（上）](https://mp.weixin.qq.com/s/xfJIVEZH15iRPe8ZqzWjCQ)
+- [第06章：AI RAG 向量库选型与生产实践（下）](https://mp.weixin.qq.com/s/bX3pMCJwmixElGC6XA-2Qw)
+
 
 ### 代码示例
 
@@ -59,6 +63,13 @@
 - [ReAct Agent](lessons/05_agents/01_react_agent.py)
 - [工具调用Agent](lessons/05_agents/02_tool_calling_agent.py)
 - [多工具Agent](lessons/05_agents/03_multi_tool_agent.py)
+
+**第06章 RAG检索增强生成**
+- [简单RAG](lessons/06_rag/01_simple_rag.py)
+- [向量存储RAG](lessons/06_rag/02_vector_store_rag.py)
+- [对话式RAG](lessons/06_rag/03_conversational_rag.py)
+- [Milvus向量存储RAG](lessons/06_rag/04_milvus_rag.py)
+
 
 
 ## 🚀 快速开始

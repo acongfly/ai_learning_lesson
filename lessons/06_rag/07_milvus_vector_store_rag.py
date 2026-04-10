@@ -1,0 +1,414 @@
+"""
+第06章 - RAG检索增强生成：向量存储 RAG（Milvus Lite）
+====================================================
+本示例是 02_vector_store_rag.py 的 Milvus 版本。
+功能完全对等：语义相似度搜索 + 完整 RAG 链，
+向量库替换为 Milvus Lite（本地文件，无需启动任何服务）。
+
+适用场景：
+  - macOS Intel (Big Sur / Monterey / Ventura, x86_64) 用户无法使用 Chroma，
+    可改用本脚本（依赖 milvus 额外包，全平台兼容）
+  - 希望在学习阶段就使用与生产环境一致的向量库
+
+对比 02_vector_store_rag.py 的差异（仅 4 行）：
+  - Chroma.from_documents(...) → Milvus.from_documents(..., connection_args={"uri": DB_PATH})
+  - vectorstore.as_retriever() API 完全相同，RAG 链代码零改动
+
+依赖安装：
+    uv sync --extra milvus
+
+适用平台：
+    ✅ macOS Intel (x86_64)
+    ✅ macOS Apple Silicon (M1/M2/M3)
+    ✅ Linux (x86_64 / aarch64)
+    ✅ Windows
+
+运行：
+    uv run python lessons/06_rag/07_milvus_vector_store_rag.py
+"""
+
+import os
+import sys
+from pathlib import Path
+
+from langchain_core.documents import Document
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+# ── pkg_resources 兼容垫片 ────────────────────────────────────────────────────
+# milvus_lite/__init__.py 仅使用 `from pkg_resources import DistributionNotFound,
+# get_distribution`（来自 setuptools）来读取自身版本号。
+# uv 默认创建的精简虚拟环境不包含 setuptools，因此注入一个基于 Python 标准库
+# importlib.metadata（Python 3.8+ 内置）的最小兼容垫片，让 milvus_lite 正常导入，
+# 无需要求用户额外安装 setuptools。
+try:
+    import pkg_resources  # noqa: F401
+except ImportError:
+    import types as _types
+    import importlib.metadata as _meta
+    _pkg = _types.ModuleType("pkg_resources")
+    _pkg.DistributionNotFound = _meta.PackageNotFoundError
+    class _Distribution:
+        __slots__ = ("version",)
+        def __init__(self, name: str) -> None:
+            self.version = _meta.version(name)
+    def _get_distribution(name: str) -> _Distribution:
+        try:
+            return _Distribution(name)
+        except _meta.PackageNotFoundError:
+            raise _meta.PackageNotFoundError(name)
+    _pkg.get_distribution = _get_distribution
+    sys.modules["pkg_resources"] = _pkg
+# ─────────────────────────────────────────────────────────────────────────────
+
+try:
+    from langchain_milvus import Milvus
+except ImportError as e:
+    print(f"错误：无法导入 langchain_milvus：{e}")
+    print("解决方法：cd ai-agent-test && uv sync --extra milvus")
+    sys.exit(1)
+
+
+# ─────────────────────────────────────────────────────────────
+# 配置
+# ─────────────────────────────────────────────────────────────
+
+# text-embedding-v4 模型的向量维度（支持动态维度：64/128/256/512/768/1024/1536/2048）
+EMBEDDING_DIMENSIONS = 1024
+
+# Milvus Lite 本地数据文件路径（无需启动任何服务）
+MILVUS_DB_PATH = "milvus_vector_store_rag.db"
+
+# Milvus Collection 名称（对应 Chroma 的 collection_name）
+COLLECTION_NAME = "chapter06_vector_store_rag"
+
+
+# ─────────────────────────────────────────────────────────────
+# 初始化：LLM + 嵌入模型
+# ─────────────────────────────────────────────────────────────
+
+def create_llm() -> ChatOpenAI:
+    """创建百炼 API ChatOpenAI 实例（qwen-plus）。"""
+    api_key = os.getenv("DASHSCOPE_API_KEY")
+    if not api_key:
+        print("错误：请设置环境变量 DASHSCOPE_API_KEY")
+        sys.exit(1)
+    return ChatOpenAI(
+        model="qwen-plus",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api_key=api_key,
+    )
+
+
+def create_embeddings() -> OpenAIEmbeddings:
+    """
+    创建嵌入模型（百炼 text-embedding-v4）。
+    嵌入模型将文本转换为高维向量，语义相似的文本向量距离近。
+    text-embedding-v4 支持动态维度：64/128/256/512/768/1024/1536/2048。
+    """
+    api_key = os.getenv("DASHSCOPE_API_KEY")
+    # dimensions：指定输出向量维度。text-embedding-v4 支持动态维度
+    # （64/128/256/512/768/1024/1536/2048），默认 1024。
+    #
+    # check_embedding_ctx_length=False：关闭 tiktoken 分词。
+    # 默认开启时，langchain-openai 会用 tiktoken 将文本转为 token 数组（List[List[int]]）
+    # 再发送给 API；但 DashScope 兼容接口只接受字符串输入，收到 token 数组会返回
+    # 400 BadRequestError（input.contents is neither str nor list of str）。
+    # 关闭后直接发送原始文本字符串，兼容 DashScope。
+    return OpenAIEmbeddings(
+        model="text-embedding-v4",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api_key=api_key,
+        dimensions=EMBEDDING_DIMENSIONS,
+        check_embedding_ctx_length=False,
+    )
+
+
+# ─────────────────────────────────────────────────────────────
+# 示例文档（AI/ML 知识库，与 02_vector_store_rag.py 相同）
+# ─────────────────────────────────────────────────────────────
+
+DOCUMENTS = [
+    Document(
+        page_content="""
+机器学习是人工智能的一个子领域，专注于开发能够从数据中学习和改进的算法。
+主要类型包括：
+- 监督学习：使用带标签的数据训练模型（如图像分类、垃圾邮件检测）
+- 无监督学习：从无标签数据中发现模式（如聚类、降维）
+- 强化学习：通过奖惩机制训练智能体（如游戏AI、机器人控制）
+机器学习的关键步骤：数据收集→特征工程→模型训练→评估→部署
+""",
+        metadata={"source": "ml_intro.txt", "topic": "机器学习基础"},
+    ),
+    Document(
+        page_content="""
+深度学习是机器学习的子集，使用多层神经网络（深度神经网络）进行学习。
+核心架构：
+- CNN（卷积神经网络）：擅长图像处理，通过卷积层提取特征
+- RNN/LSTM：处理序列数据，适合自然语言处理和时间序列
+- Transformer：基于自注意力机制，是现代LLM的基础架构
+- GAN（生成对抗网络）：生成图像、音频等内容
+深度学习需要大量数据和计算资源（GPU），但效果远超传统机器学习。
+""",
+        metadata={"source": "dl_intro.txt", "topic": "深度学习"},
+    ),
+    Document(
+        page_content="""
+大语言模型（LLM）是基于Transformer架构的超大规模语言模型。
+代表性模型：GPT系列(OpenAI)、Qwen系列(阿里)、Llama系列(Meta)、Claude(Anthropic)
+LLM的训练阶段：
+1. 预训练：在海量文本上预测下一个词（自监督学习）
+2. 指令微调（SFT）：在指令数据集上进行监督微调
+3. RLHF：人类反馈的强化学习，对齐人类偏好
+LLM的能力：对话、写作、代码生成、推理、翻译、摘要等
+上下文窗口（Context Window）：模型一次能处理的最大文本长度。
+""",
+        metadata={"source": "llm_intro.txt", "topic": "大语言模型"},
+    ),
+    Document(
+        page_content="""
+RAG（Retrieval-Augmented Generation，检索增强生成）是一种将信息检索与文本生成结合的技术。
+RAG解决了LLM的两个核心问题：
+1. 知识截止：LLM训练数据有时间限制，RAG可提供最新信息
+2. 幻觉问题：LLM可能编造信息，RAG让模型基于真实文档回答
+
+RAG的核心组件：
+- 文档加载器：读取PDF、网页、数据库等各类文档
+- 文本分割器：将长文档切成适合嵌入的小块（chunks）
+- 嵌入模型：将文本转为向量（如 text-embedding-v4）
+- 向量数据库：存储和检索向量（Milvus、Chroma、FAISS）
+- 生成器：LLM基于检索到的文档生成答案
+""",
+        metadata={"source": "rag_intro.txt", "topic": "RAG技术"},
+    ),
+    Document(
+        page_content="""
+向量数据库是专门用于存储和检索高维向量的数据库系统。
+工作原理：将文本/图像等转换为向量，通过相似度（余弦相似度、欧氏距离）搜索最相近的向量。
+
+主流向量数据库对比：
+- Milvus：开源分布式、支持十亿级向量、企业级功能、Lite模式全平台支持
+- Chroma：开源、纯Python、易用、支持持久化、适合开发学习
+- FAISS（Meta）：高性能、纯内存、适合中小规模、Linux/macOS 14+(Apple Silicon/Intel)/Windows
+- Pinecone：云服务、全托管、高可用、适合生产环境
+
+选择建议：
+- 学习/原型：Milvus Lite（全平台兼容，包括 macOS Intel）
+- 高性能本地：FAISS（需 Linux/macOS 14+(Apple Silicon/Intel)/Windows）
+- 生产环境：Milvus Standalone/Distributed 或 Pinecone
+""",
+        metadata={"source": "vectordb.txt", "topic": "向量数据库"},
+    ),
+    Document(
+        page_content="""
+LangChain是一个用于开发LLM应用的开源框架，提供了：
+- Prompt模板：结构化的提示管理
+- 链（Chain）：通过LCEL（|操作符）组合多个组件
+- 工具（Tools）：让LLM调用外部API和函数
+- 记忆（Memory）：维护对话历史
+- Agent：自主决策的智能体
+- RAG：检索增强生成的完整工具链
+
+LCEL（LangChain Expression Language）：
+使用 | 操作符将组件串联：prompt | llm | parser
+支持 invoke（同步）、stream（流式）、batch（批量）调用
+""",
+        metadata={"source": "langchain_intro.txt", "topic": "LangChain框架"},
+    ),
+]
+
+
+# ─────────────────────────────────────────────────────────────
+# 核心功能
+# ─────────────────────────────────────────────────────────────
+
+def build_vector_store(
+    documents: list[Document],
+    embeddings: OpenAIEmbeddings,
+) -> Milvus:
+    """
+    从文档列表构建 Milvus 向量存储。
+
+    步骤：
+    1. 文本分割（将长文档切成小块，避免超出嵌入模型 token 限制）
+    2. 嵌入计算（调用百炼 API 将文本转为 1024 维向量）
+    3. 构建 Milvus Lite 索引（写入本地 .db 文件）
+    """
+    print("正在构建 Milvus 向量存储...")
+
+    # 步骤1：文本分割
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=500,                                     # 每块最大字符数
+        chunk_overlap=50,                                   # 相邻块的重叠字符数（保持上下文连贯）
+        separators=["\n\n", "\n", "。", "，", " ", ""],     # 优先按段落分割
+    )
+    chunks = text_splitter.split_documents(documents)
+    print(f"  文档数量：{len(documents)} → 分割后块数：{len(chunks)}")
+
+    # 如有旧数据文件则删除，保证本次演示数据干净
+    db_path = Path(MILVUS_DB_PATH)
+    if db_path.exists():
+        db_path.unlink()
+
+    # 步骤2 + 3：计算嵌入并写入 Milvus Lite（本地文件）
+    print("  正在计算嵌入向量（调用百炼 API）...")
+    try:
+        vectorstore = Milvus.from_documents(
+            documents=chunks,
+            embedding=embeddings,
+            collection_name=COLLECTION_NAME,
+            connection_args={"uri": MILVUS_DB_PATH},       # Milvus Lite：URI 即本地文件路径
+        )
+    except Exception as e:
+        err = str(e)
+        err_repr = repr(e)
+        print("❌ Milvus 初始化失败")
+        print(f"   错误类型：{type(e).__name__}")
+        if err:
+            print(f"   错误信息：{err[:400]}")
+        else:
+            print(f"   错误详情：{err_repr[:400]}")
+        if "pkg_resources" in err or "pkg_resources" in err_repr or "setuptools" in err or "setuptools" in err_repr:
+            print("   可能原因：setuptools 未安装或环境不完整。")
+            print("   解决方法：cd ai-agent-test && git pull && uv sync --extra milvus")
+        elif not err:
+            print("   可能原因：pymilvus 与 milvus-lite 版本不兼容，或 gRPC 协议错误。")
+            print("   解决方法：cd ai-agent-test && uv sync --extra milvus")
+        else:
+            print("   解决方法：cd ai-agent-test && uv sync --extra milvus")
+        sys.exit(1)
+
+    print(f"  向量存储构建完成！共索引 {len(chunks)} 个文本块")
+    return vectorstore
+
+
+def demo_similarity_search(vectorstore: Milvus) -> None:
+    """
+    演示向量相似度搜索。
+    展示语义搜索的强大之处：不需要精确匹配关键词，基于语义相似度检索。
+    """
+    print("\n=== 语义相似度搜索演示 ===\n")
+
+    queries = [
+        "神经网络有哪些类型？",             # 应该命中深度学习文档
+        "怎么解决模型知识过时的问题？",      # 应该命中 RAG 文档
+        "向量检索数据库哪个好用？",          # 应该命中向量数据库文档
+    ]
+
+    for query in queries:
+        print(f"查询：{query}")
+        # similarity_search：返回语义最相似的 k 个文档块
+        results = vectorstore.similarity_search(query, k=2)
+
+        for i, doc in enumerate(results, 1):
+            topic = doc.metadata.get("topic", "未知")
+            preview = doc.page_content.strip()[:100]
+            print(f"  [{i}] 主题：{topic}")
+            print(f"       内容预览：{preview}...")
+        print()
+
+
+def build_rag_chain(vectorstore: Milvus, llm: ChatOpenAI):
+    """
+    构建完整的 RAG 链（使用 LCEL）。
+
+    数据流：
+      用户问题
+        → retriever（Milvus 向量检索，返回最相关 3 个文本块）
+        → format_docs（将文档列表拼成字符串）
+        → rag_prompt（注入 context + question）
+        → llm（生成回答）
+        → StrOutputParser（提取纯文本）
+    """
+    # 创建检索器（as_retriever API 与 Chroma 完全相同）
+    retriever = vectorstore.as_retriever(
+        search_kwargs={"k": 3}              # 每次检索返回 3 个最相关文档块
+    )
+
+    # RAG 提示模板
+    rag_prompt = ChatPromptTemplate.from_messages([
+        (
+            "system",
+            """你是一个 AI 技术专家助手。请基于以下检索到的文档内容回答用户问题。
+
+回答要求：
+1. 只使用提供的文档内容回答，不要添加文档中没有的信息
+2. 如果文档中没有相关信息，请明确说明
+3. 回答要简洁、准确、有条理
+
+===== 检索到的文档 =====
+{context}
+========================""",
+        ),
+        ("human", "{question}"),
+    ])
+
+    def format_docs(docs: list[Document]) -> str:
+        """将文档列表格式化为带编号的字符串，方便 LLM 识别文档边界。"""
+        parts = []
+        for i, doc in enumerate(docs, 1):
+            topic = doc.metadata.get("topic", "")
+            parts.append(f"[文档{i} - {topic}]\n{doc.page_content.strip()}")
+        return "\n\n".join(parts)
+
+    # 构建 RAG 链（LCEL 语法）
+    # 注意：retriever 和 format_docs 的串联方式与 Chroma 版本完全相同
+    rag_chain = (
+        {
+            "context": retriever | format_docs,     # 检索 → 格式化为字符串
+            "question": RunnablePassthrough(),       # 原样传递用户问题
+        }
+        | rag_prompt
+        | llm
+        | StrOutputParser()
+    )
+
+    return rag_chain
+
+
+def demo_rag_qa(rag_chain, questions: list[str]) -> None:
+    """演示 RAG 问答——向 RAG 链提问并打印答案。"""
+    print("\n=== RAG 问答演示 ===\n")
+
+    for question in questions:
+        print(f"问：{question}")
+        answer = rag_chain.invoke(question)
+        print(f"答：{answer}")
+        print("-" * 50)
+
+
+# ─────────────────────────────────────────────────────────────
+# 主函数
+# ─────────────────────────────────────────────────────────────
+
+def main() -> None:
+    llm = create_llm()
+    embeddings = create_embeddings()
+
+    # 构建 Milvus 向量存储
+    vectorstore = build_vector_store(DOCUMENTS, embeddings)
+
+    # 演示语义相似度搜索
+    demo_similarity_search(vectorstore)
+
+    # 构建 RAG 链
+    rag_chain = build_rag_chain(vectorstore, llm)
+
+    # 测试 RAG 问答（问题与 02_vector_store_rag.py 相同）
+    questions = [
+        "什么是大语言模型？它是如何训练的？",
+        "Milvus 和 Pinecone 有什么区别，分别适合什么场景？",
+        "RAG 技术主要解决什么问题？",
+        "LangChain 的 LCEL 是什么？",
+    ]
+    demo_rag_qa(rag_chain, questions)
+
+    print("\n✅ Milvus 向量存储 RAG 示例运行完成！")
+    print(f"   本地数据库文件：{MILVUS_DB_PATH}")
+
+
+if __name__ == "__main__":
+    main()
